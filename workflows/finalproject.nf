@@ -58,6 +58,8 @@ include { BOWTIE2_ALIGN as BOWTIE2_ALIGN_ORG  } from '../modules/nf-core/bowtie2
 include { STARSOLO as STAR_HOST               } from '../subworkflows/local/starsolo'
 include { STARSOLO as STAR_ORG                } from '../subworkflows/local/starsolo'
 include { PREPARE_GENOME                      } from '../subworkflows/local/prepare_genome'
+include { EURYALE as EURYALE_4_STAR           } from '../subworkflows/local/euryale'
+include { EURYALE as EURYALE_4_BT2            } from '../subworkflows/local/euryale'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -71,6 +73,8 @@ def multiqc_report = []
 workflow FINALPROJECT {
 
     ch_versions = Channel.empty()
+    ch_unmapped_reads_star = Channel.empty()
+    ch_unmapped_reads_bt2 = Channel.empty()
 
     //
     // SUBWORKFLOW: Read in samplesheet, validate and stage input files
@@ -83,8 +87,9 @@ workflow FINALPROJECT {
     //
     // Get reads after checking went successfull
     //
-    ch_reads = INPUT_CHECK.out.reads
 
+    INPUT_CHECK.out.reads
+        .set{ ch_reads }
 
     //
     // MODULE: Run FastQC
@@ -109,35 +114,52 @@ workflow FINALPROJECT {
     // MODULE: Run STAR to filter reads against host
     //
     STAR_HOST(
-            PREPARE_GENOME.out.fasta_fil,
-            PREPARE_GENOME.out.gtf_fil,
-            ch_reads,
-            params.save_unmapped,
-            params.star_index,
-            params.seq_center,
-            params.seq_platform
-        )
-        ch_versions = ch_versions.mix(STAR_HOST.out.versions)
-        ch_multiqc_star_samples_to_host = STAR_HOST.out.for_multiqc
+        PREPARE_GENOME.out.fasta_fil,
+        PREPARE_GENOME.out.gtf_fil,
+        ch_reads,
+        params.save_unmapped,
+        params.star_index,
+        params.seq_center,
+        params.seq_platform
+    )
+    ch_versions = ch_versions.mix(STAR_HOST.out.versions)
+
+    STAR_HOST.out.for_multiqc
+        .set { ch_multiqc_star_samples_to_host }
 
     //
     // MODULE: Run STAR to align unmapped reads against organism of interest
     //
 
     STAR_ORG(
-            PREPARE_GENOME.out.fasta_al,
-            PREPARE_GENOME.out.gtf_al,
-            STAR_HOST.out.result_unmapped,
-            params.save_unmapped,
-            params.star_index,
-            params.seq_center,
-            params.seq_platform
+        PREPARE_GENOME.out.fasta_al,
+        PREPARE_GENOME.out.gtf_al,
+        STAR_HOST.out.result_unmapped,
+        params.save_unmapped,
+        params.star_index,
+        params.seq_center,
+        params.seq_platform
     )
 
     ch_versions = ch_versions.mix(STAR_ORG.out.versions)
-    ch_multiqc_star_unmapped_to_org = STAR_ORG.out.for_multiqc
 
+    STAR_ORG.out.for_multiqc
+        .set{ ch_multiqc_star_unmapped_to_org }
 
+    STAR_ORG.out.result_unmapped
+        .set{ ch_unmapped_reads_star }
+
+    //
+    // Contamination metagenomic analysis
+    //
+
+    EURYALE_4_STAR(
+        ch_unmapped_reads_star
+    )
+
+    // EURYALE_4_BT2(
+    //     ch_unmapped_reads_bt2
+    // )
 }
 
 /*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
